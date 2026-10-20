@@ -13,7 +13,7 @@ Jit is a small native macOS app. A 32×32 pixel squid hangs just below the botto
 - One chime for both tools, generated in code, with its own volume slider.
 - A small mark per finished tool: an orange spark for Claude Code, a terminal prompt for Codex.
 - Click Jit to clear the marks and send him back to peeking. Double-click to bring him up or send him back down, in any Space.
-- Keeps peeking while a fullscreen app is active. The chime still plays, and he jumps up when you leave fullscreen (or when you double-click him).
+- Ducks into his peek when you switch to a fullscreen app, and comes back up when you leave it. A task finishing still brings him up, even in fullscreen.
 - Pause from the menu bar: finished tasks still count and show up when you resume.
 - Clicks pass through everywhere except the squid, and Jit never takes focus.
 - Bring your own 32×32 sprite.
@@ -94,7 +94,6 @@ Claude Code / Codex finishes a turn
 - **Jit isn't running.** Look for the squid icon in the menu bar. If it's missing, run Jit again from Xcode. While Jit is off, the hooks do nothing and cause no errors.
 - **No sound.** Check the volume slider in Jit's menu and your Mac's output volume. Pausing also silences the chime.
 - **Jit doesn't appear after you set a custom sprite.** macOS may be waiting for you to allow Jit to read the folder the sprite is in. Allow it, or move the sprite out of Desktop, Documents and Downloads.
-- **Jit keeps peeking after a task finishes.** A fullscreen app is active: he comes up when you leave fullscreen, or double-click him to bring him up now.
 - **Check the pipe by hand.** This should chime and bring him up:
 
   ```bash

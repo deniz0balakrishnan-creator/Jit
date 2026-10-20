@@ -17,7 +17,7 @@ final class Pet {
         didSet { UserDefaults.standard.set(wantsUp, forKey: "up") }
     }
     private var fullscreen = false
-    /// While a fullscreen app is active he peeks, unless you double-click him up there.
+    /// Entering fullscreen ducks him into the peek; a finish or a double-click brings him back up.
     private var raisedInFullscreen = false
     private var marks: [Tool] = []
     private var finishedWhilePaused: [Tool] = []
@@ -83,10 +83,11 @@ final class Pet {
         }
     }
 
-    /// He comes up with the marks; in fullscreen he keeps peeking until it ends.
+    /// He jumps up with the marks, in fullscreen too.
     private func reveal(_ tools: [Tool]) {
         add(tools, to: &marks)
         wantsUp = true
+        raisedInFullscreen = fullscreen
         update(jumpAgain: true)
     }
 
