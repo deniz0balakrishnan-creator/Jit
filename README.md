@@ -11,7 +11,7 @@ A tiny pixel squid that lives on the bottom edge of your Mac and chimes when Cla
 Jit is a small native macOS app. A 32×32 pixel squid hangs just below the bottom edge of your main screen, peeking over it with his tentacles gripping the edge and blinking now and then. While Claude Code or Codex is working on your prompt, he rises a little and thinks, chin on a tentacle, with that tool's icon in a thought bubble. When the task finishes, Jit plays a short chime, jumps up, and floats above the edge with a mark showing which tool finished. He stays up until you click him, so you can't miss a finished task even if you were away.
 
 - One chime for both tools, generated in code, with its own volume slider.
-- A small mark per finished tool: an orange spark for Claude Code, a terminal prompt for Codex.
+- A small mark per finished tool: an orange spark for Claude Code, a blue cloud with a prompt (like the Codex app's icon) for Codex.
 - Click Jit while he's idle and he thinks: a thought bubble offers Claude and Codex, and picking one takes you to the app it runs in (or opens it). Click him again to close the bubble.
 - Click Jit while he's up to clear the marks and send him back to peeking. Double-click to bring him up or send him back down, in any Space.
 - Ducks into his peek when you switch to a fullscreen app, and comes back up when you leave it. A task finishing still brings him up, even in fullscreen.

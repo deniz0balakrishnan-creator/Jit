@@ -15,21 +15,22 @@ enum Art {
         "....c....",
     ]
 
-    /// Codex mark: a terminal prompt on a dark tile.
+    /// Codex mark: a white prompt on a blue-to-violet cloud, like the Codex app's icon.
     private static let codexRows = [
-        ".kkkkkkk.",
-        "kkkkkkkkk",
-        "kwkkkkkkk",
-        "kkwkkkkkk",
-        "kkkwkkkkk",
-        "kkwkkkkkk",
-        "kwkkwwwkk",
-        "kkkkkkkkk",
-        ".kkkkkkk.",
+        "..aa.aa..",
+        ".aaaaaaa.",
+        "abbbbbbba",
+        "bbwbbbbbb",
+        "mmmwmmmmm",
+        "mmwmwwwmm",
+        "ddddddddd",
+        ".ddddddd.",
+        "..dd.dd..",
     ]
 
     private static let palette: [Character: (UInt8, UInt8, UInt8)] = [
-        "c": (217, 119, 87), "k": (32, 33, 36), "w": (255, 255, 255),  // marks
+        "c": (217, 119, 87), "w": (255, 255, 255),                            // Claude mark, white
+        "a": (176, 160, 255), "b": (112, 142, 255), "m": (84, 118, 255), "d": (48, 68, 250),  // Codex cloud
         "O": (32, 33, 36), "F": (255, 255, 255),                       // bubble outline and fill
     ]
 
