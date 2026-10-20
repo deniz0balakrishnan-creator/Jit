@@ -1,0 +1,12 @@
+# The user's own sprite art (not redistributable)
+assets/
+
+# Build output
+DerivedData/
+.build/
+build/
+
+# Xcode per-user state
+xcuserdata/
+
+.DS_Store
