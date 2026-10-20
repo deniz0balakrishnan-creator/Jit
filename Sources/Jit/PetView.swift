@@ -2,40 +2,53 @@ import AppKit
 
 /// Draws the squid at 4× with nearest-neighbour scaling, and runs his animations.
 ///
-/// Layers: root → bodyLayer (its mask hides all but the bottom rows when tucked)
-///         → spriteLayer (bob, hop, squash and stretch) and marksLayer (tool marks above his head).
+/// Two poses:
+/// - peeking (inactive): he hangs below the screen's bottom edge, his head and eyes peeking
+///   over it and two tentacle paws gripping it;
+/// - up (a task finished): he jumps out and floats just above the edge, bobbing, with the
+///   tool marks over his head.
+///
+/// Layers: root (clips at the screen edge) → pawLayer, and bodyLayer (moves between the poses)
+///         → floatLayer (float bob) → spriteLayer (blink, peek bob, squash and stretch) and marksLayer.
 final class PetView: NSView {
     static let scale: CGFloat = 4
     static let spriteSide = CGFloat(Sprite.size) * scale  // 128 pt
-    static let size = NSSize(width: 168, height: 212)     // room for the hop and the marks
-    static let tuckedRowsShown: CGFloat = 6
-    static let hopHeight: CGFloat = 30
-    static let hopDuration: CFTimeInterval = 0.5
+    static let size = NSSize(width: 168, height: 200)     // room for the jump, the bob and the marks
+    static let floatHeight: CGFloat = 10                  // his feet, above the edge, while up
+    static let jumpDuration: CFTimeInterval = 0.6
 
     var onClick: () -> Void = {}
     var onDoubleClick: () -> Void = {}
 
     private let sprite: Sprite
-    private let tuckMask = CALayer()
+    private let pawLayer = CALayer()
     private let bodyLayer = CALayer()
+    private let floatLayer = CALayer()
     private let spriteLayer = CALayer()
     private let marksLayer = CALayer()
-    private var tucked = false
+    private(set) var isUp = false
     private var showingMarks = false
     private var pendingClick: DispatchWorkItem?
     private var blinkTimer: Timer?
+    private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    /// Body offsets for the two poses: peeking hides everything below the peek rows.
+    private var peekY: CGFloat { -CGFloat(Sprite.size - sprite.peekRows) * Self.scale }
+    private var upY: CGFloat { Self.floatHeight }
 
     init(sprite: Sprite) {
         self.sprite = sprite
         super.init(frame: NSRect(origin: .zero, size: Self.size))
         wantsLayer = true
+        layer!.masksToBounds = true  // the window's bottom is the screen's bottom edge
+
+        let pawsSize = CGSize(width: CGFloat(Sprite.pawsWidth) * Self.scale, height: 3 * Self.scale)
+        pawLayer.contents = sprite.paws
+        pawLayer.magnificationFilter = .nearest
+        pawLayer.frame = CGRect(x: bounds.midX - pawsSize.width / 2, y: 0, width: pawsSize.width, height: pawsSize.height)
 
         bodyLayer.frame = bounds
-        tuckMask.backgroundColor = NSColor.black.cgColor
-        tuckMask.anchorPoint = CGPoint(x: 0.5, y: 0)
-        tuckMask.bounds = bounds
-        tuckMask.position = CGPoint(x: bounds.midX, y: 0)
-        bodyLayer.mask = tuckMask
+        floatLayer.frame = bounds
         spriteLayer.contents = sprite.open
         spriteLayer.magnificationFilter = .nearest
         spriteLayer.bounds = CGRect(x: 0, y: 0, width: Self.spriteSide, height: Self.spriteSide)
@@ -45,33 +58,52 @@ final class PetView: NSView {
         marksLayer.isHidden = true
 
         layer!.addSublayer(bodyLayer)
-        bodyLayer.addSublayer(spriteLayer)
-        bodyLayer.addSublayer(marksLayer)
+        layer!.addSublayer(pawLayer)  // in front: the paws hold the edge
+        bodyLayer.addSublayer(floatLayer)
+        floatLayer.addSublayer(spriteLayer)
+        floatLayer.addSublayer(marksLayer)
 
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel("Jit")
 
-        startIdle()
+        setBodyY(peekY)
+        startPeekBob()
+        scheduleBlink()
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    // MARK: Idle: a slow one-pixel bob and a blink every 3 to 5 seconds
+    // MARK: Idle
 
-    /// The bob stretches him one pixel taller from his feet, so his tentacle tips stay gripping the edge.
+    /// While peeking he rises one pixel now and then, as if taking a look.
+    private func startPeekBob() {
+        guard !reduceMotion else { return }
+        let bob = CAKeyframeAnimation(keyPath: "transform.translation.y")
+        bob.values = [0, Self.scale]  // whole sprite pixels keep him crisp
+        bob.keyTimes = [0, 0.6, 1]
+        bob.calculationMode = .discrete
+        bob.duration = 3
+        bob.repeatCount = .infinity
+        spriteLayer.add(bob, forKey: "peekBob")
+    }
 
-    private func startIdle() {
-        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            let bob = CAKeyframeAnimation(keyPath: "transform.scale.y")
-            bob.values = [1, (Self.spriteSide + Self.scale) / Self.spriteSide]  // exactly one sprite pixel
-            bob.keyTimes = [0, 0.5, 1]
-            bob.calculationMode = .discrete
-            bob.duration = 2.4
-            bob.repeatCount = .infinity
-            spriteLayer.add(bob, forKey: "bob")
+    /// While up he floats: a slow bob plus a gentle sideways drift.
+    private func startFloating(after delay: CFTimeInterval) {
+        guard !reduceMotion else { return }
+        for (key, keyPath, amount, period) in [("bob", "transform.translation.y", 5.0, 1.2),
+                                              ("drift", "transform.translation.x", 4.0, 1.9)] {
+            let a = CABasicAnimation(keyPath: keyPath)
+            a.fromValue = -amount
+            a.toValue = amount
+            a.duration = period
+            a.autoreverses = true
+            a.repeatCount = .infinity
+            a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            a.beginTime = CACurrentMediaTime() + delay
+            a.fillMode = .backwards
+            floatLayer.add(a, forKey: key)
         }
-        scheduleBlink()
     }
 
     private func scheduleBlink() {
@@ -94,54 +126,76 @@ final class PetView: NSView {
 
     // MARK: Poses
 
-    func setTucked(_ tucked: Bool, animated: Bool) {
-        guard tucked != self.tucked else { return }
-        self.tucked = tucked
+    private func setBodyY(_ y: CGFloat) {
         CATransaction.begin()
-        CATransaction.setAnimationDuration(animated ? 0.25 : 0)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: tucked ? .easeIn : .easeOut))
-        CATransaction.setDisableActions(!animated)
-        tuckMask.bounds.size.height = tucked ? Self.tuckedRowsShown * Self.scale : bounds.height
+        CATransaction.setDisableActions(true)
+        bodyLayer.position.y = bounds.midY + y
         CATransaction.commit()
     }
 
-    /// Rises about 30 pt with squash and stretch, then settles into perched.
-    /// From tucked, he first unfolds into view.
-    func hop() {
-        let delay: CFTimeInterval = tucked ? 0.25 : 0
-        setTucked(false, animated: true)
-        let times: [NSNumber] = [0, 0.12, 0.42, 0.7, 0.84, 1]
-        let up = CAMediaTimingFunction(name: .easeOut), down = CAMediaTimingFunction(name: .easeIn)
-        let linear = CAMediaTimingFunction(name: .linear)
-        let curves = [linear, up, down, linear, up]
-        func track(_ keyPath: String, _ values: [CGFloat]) -> CAKeyframeAnimation {
+    private func setPawsVisible(_ visible: Bool, delay: CFTimeInterval = 0) {
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = pawLayer.presentation()?.opacity ?? pawLayer.opacity
+        fade.toValue = visible ? 1 : 0
+        fade.duration = 0.12
+        fade.beginTime = CACurrentMediaTime() + delay
+        fade.fillMode = .backwards
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        pawLayer.opacity = visible ? 1 : 0
+        CATransaction.commit()
+        pawLayer.add(fade, forKey: "fade")
+    }
+
+    /// Jumps out of the peek (or, if already up, jumps again) and settles into floating.
+    func jumpUp() {
+        let from = isUp ? upY : peekY
+        isUp = true
+        spriteLayer.removeAnimation(forKey: "peekBob")
+        setPawsVisible(false)
+        setBodyY(upY)
+
+        let times: [NSNumber] = [0, 0.15, 0.55, 0.85, 1]
+        let rise = CAKeyframeAnimation(keyPath: "position.y")
+        rise.values = [from, from - 4, upY + 30, upY - 3, upY].map { bounds.midY + $0 }
+        rise.keyTimes = times
+        rise.timingFunctions = [.easeIn, .easeOut, .easeIn, .easeOut].map { CAMediaTimingFunction(name: $0) }
+        rise.duration = Self.jumpDuration
+        bodyLayer.add(rise, forKey: "jump")
+
+        let squash = CAAnimationGroup()
+        squash.animations = [("transform.scale.x", [1, 1.12, 0.92, 1.1, 1]),
+                             ("transform.scale.y", [1, 0.86, 1.12, 0.88, 1])].map { keyPath, values in
             let a = CAKeyframeAnimation(keyPath: keyPath)
             a.values = values
             a.keyTimes = times
-            a.timingFunctions = curves
             return a
         }
-        let hop = CAAnimationGroup()
-        hop.animations = [
-            track("transform.translation.y", [0, 0, Self.hopHeight, 0, 0, 0]),
-            track("transform.scale.x", [1, 1.12, 0.92, 1, 1.18, 1]),  // crouch, stretch, land squash
-            track("transform.scale.y", [1, 0.86, 1.1, 1, 0.8, 1]),
-        ]
-        hop.duration = Self.hopDuration
-        hop.beginTime = CACurrentMediaTime() + delay
-        hop.fillMode = .backwards
-        spriteLayer.add(hop, forKey: "hop")
+        squash.duration = Self.jumpDuration
+        spriteLayer.add(squash, forKey: "squash")
+
+        floatLayer.removeAllAnimations()
+        startFloating(after: Self.jumpDuration)
     }
 
-    /// A small squash when he's clicked back down to perched.
-    func settle() {
-        let squash = CAKeyframeAnimation(keyPath: "transform.scale.y")
-        squash.values = [1, 0.9, 1]
-        squash.duration = 0.18
-        spriteLayer.add(squash, forKey: "settle")
+    /// Drops back below the edge into the peek.
+    func dropDown() {
+        guard isUp else { return }
+        isUp = false
+        floatLayer.removeAllAnimations()
+        let from = bodyLayer.presentation()?.position.y ?? bounds.midY + upY
+        setBodyY(peekY)
+        let fall = CABasicAnimation(keyPath: "position.y")
+        fall.fromValue = from
+        fall.toValue = bounds.midY + peekY
+        fall.duration = 0.3
+        fall.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        bodyLayer.add(fall, forKey: "jump")
+        setPawsVisible(true, delay: 0.25)
+        startPeekBob()
     }
 
-    /// Shows one mark per tool, in order. `delay` lets a hop land first.
+    /// Shows one mark per tool, in order, once he's up. `delay` lets a jump land first.
     func setMarks(_ marks: [Tool], delay: TimeInterval = 0) {
         let images = marks.map { $0 == .claude ? Art.claudeMark : Art.codexMark }
         showingMarks = !images.isEmpty
@@ -162,7 +216,7 @@ final class PetView: NSView {
 
         guard showingMarks else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, self.showingMarks else { return }
+            guard let self, self.showingMarks, self.isUp else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             self.marksLayer.isHidden = false
@@ -176,14 +230,20 @@ final class PetView: NSView {
         }
     }
 
-    // MARK: Clicks: only opaque squid pixels (and the marks) count as him
+    // MARK: Clicks: only his visible pixels (paws and marks included) count as him
 
     func isOnPet(_ point: NSPoint) -> Bool {
-        if showingMarks && !marksLayer.isHidden && marksLayer.frame.contains(point) { return true }
-        if tucked && point.y >= Self.tuckedRowsShown * Self.scale { return false }
-        let col = Int(floor((point.x - (bounds.midX - Self.spriteSide / 2)) / Self.scale))
-        let row = Sprite.size - 1 - Int(floor(point.y / Self.scale))
-        return point.y >= 0 && sprite.isOpaque(col: col, row: row)
+        guard bounds.contains(point), let root = layer?.presentation() ?? layer else { return false }
+        if !isUp {
+            let p = pawLayer.convert(point, from: layer)
+            let col = Int(floor(p.x / Self.scale)), row = 2 - Int(floor(p.y / Self.scale))
+            if sprite.isPawOpaque(col: col, row: row) { return true }
+        }
+        let marks = marksLayer.presentation() ?? marksLayer
+        if showingMarks && !marksLayer.isHidden && marks.convert(marks.bounds, to: root).contains(point) { return true }
+        let p = (spriteLayer.presentation() ?? spriteLayer).convert(point, from: root)
+        let col = Int(floor(p.x / Self.scale)), row = Sprite.size - 1 - Int(floor(p.y / Self.scale))
+        return sprite.isOpaque(col: col, row: row)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }

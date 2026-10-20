@@ -5,23 +5,25 @@ enum Tool: String {
     var displayName: String { self == .claude ? "Claude Code" : "Codex" }
 }
 
-/// Jit's behaviour: where he sits, when he's tucked, hops, marks, and pause.
+/// Jit's behaviour: where he sits, when he peeks or comes up, the marks, and pause.
 final class Pet {
     var onChime: () -> Void = {}
 
     private(set) var paused = false
     private let window: NSPanel
     private let view: PetView
-    private var userTucked = UserDefaults.standard.bool(forKey: "tucked") {
-        didSet { UserDefaults.standard.set(userTucked, forKey: "tucked") }
+    /// Whether he should be up, out of the peek. Kept across restarts.
+    private var wantsUp = UserDefaults.standard.bool(forKey: "up") {
+        didSet { UserDefaults.standard.set(wantsUp, forKey: "up") }
     }
     private var fullscreen = false
+    /// While a fullscreen app is active he peeks, unless you double-click him up there.
+    private var raisedInFullscreen = false
     private var marks: [Tool] = []
     private var finishedWhilePaused: [Tool] = []
-    private var hopWhenFullscreenEnds = false
     private var timers: [Timer] = []
 
-    private var tucked: Bool { fullscreen || userTucked }
+    private var shouldBeUp: Bool { wantsUp && (!fullscreen || raisedInFullscreen) }
 
     init(sprite: Sprite) {
         view = PetView(sprite: sprite)
@@ -30,18 +32,18 @@ final class Pet {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.level = .floating
+        window.level = .statusBar  // above the Dock, whose row he shares
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         window.ignoresMouseEvents = true
         window.contentView = view
 
         view.onClick = { [weak self] in self?.dismiss() }
-        view.onDoubleClick = { [weak self] in self?.toggleTucked() }
+        view.onDoubleClick = { [weak self] in self?.toggleUp() }
 
         fullscreen = Self.fullscreenAppIsActive()
-        view.setTucked(tucked, animated: false)
         place()
         window.orderFrontRegardless()
+        update()
 
         // Clicks pass through everywhere except the squid: only accept mouse events while
         // the pointer is over one of his pixels.
@@ -81,51 +83,54 @@ final class Pet {
         }
     }
 
+    /// He comes up with the marks; in fullscreen he keeps peeking until it ends.
     private func reveal(_ tools: [Tool]) {
         add(tools, to: &marks)
-        userTucked = false
-        if fullscreen {
-            hopWhenFullscreenEnds = true
-        } else {
-            view.hop()
-            view.setMarks(marks, delay: PetView.hopDuration + 0.25)
-        }
+        wantsUp = true
+        update(jumpAgain: true)
     }
 
-    /// Click: clear the marks and drop back to perched.
+    /// Click: clear the marks and drop back into the peek.
     private func dismiss() {
-        guard !marks.isEmpty else { return }
+        guard view.isUp else { return }
         marks = []
-        view.setMarks([])
-        view.settle()
+        wantsUp = false
+        raisedInFullscreen = false
+        update()
     }
 
-    /// Double-click: toggle tucked and up.
-    private func toggleTucked() {
-        guard !fullscreen else { return }
-        userTucked.toggle()
-        marks = []
-        view.setMarks([])
-        view.setTucked(userTucked, animated: true)
-        updatePassThrough()
+    /// Double-click: toggle peeking and up, in any Space, fullscreen ones included.
+    private func toggleUp() {
+        if view.isUp {
+            marks = []
+            wantsUp = false
+            raisedInFullscreen = false
+        } else {
+            wantsUp = true
+            raisedInFullscreen = fullscreen
+        }
+        update()
     }
 
     private func checkFullscreen() {
         let now = Self.fullscreenAppIsActive()
         guard now != fullscreen else { return }
         fullscreen = now
-        place()
-        if fullscreen {
+        raisedInFullscreen = false
+        update()
+    }
+
+    /// Moves him into the pose the state calls for. `jumpAgain` makes him jump even when
+    /// he's already up, for a new finish.
+    private func update(jumpAgain: Bool = false) {
+        if shouldBeUp && (!view.isUp || jumpAgain) {
+            view.jumpUp()
+            view.setMarks(marks, delay: PetView.jumpDuration)
+        } else if !shouldBeUp && view.isUp {
             view.setMarks([])
-            view.setTucked(true, animated: true)
-        } else if hopWhenFullscreenEnds {
-            hopWhenFullscreenEnds = false
-            view.hop()
-            view.setMarks(marks, delay: PetView.hopDuration + 0.25)
-        } else {
-            view.setTucked(tucked, animated: true)
-            view.setMarks(marks)
+            view.dropDown()
         }
+        updatePassThrough()
     }
 
     // MARK: Helpers
@@ -134,11 +139,10 @@ final class Pet {
         for tool in tools where !list.contains(tool) { list.append(tool) }
     }
 
-    /// Bottom-right of the primary screen: on top of the Dock normally, on the very edge in fullscreen.
+    /// Bottom-right corner of the primary screen, flush with its bottom edge.
     private func place() {
         guard let screen = NSScreen.screens.first else { return }
-        let bottom = fullscreen ? screen.frame.minY : screen.visibleFrame.minY
-        window.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - PetView.size.width - 24, y: bottom))
+        window.setFrameOrigin(NSPoint(x: screen.frame.maxX - PetView.size.width - 8, y: screen.frame.minY))
     }
 
     private func updatePassThrough() {

@@ -3,24 +3,24 @@
 A tiny pixel squid that lives on the bottom edge of your Mac and chimes when Claude Code or Codex finishes.
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Jit hopping up with a Claude mark and a Codex mark after two tasks finish, then dropping back down when clicked" width="266">
+  <img src="docs/demo.gif" alt="Jit peeking over the bottom edge, jumping up to float with a Claude mark and then a Codex mark, and dropping back into his peek when clicked" width="258">
 </p>
 
 ## What it does
 
-Jit is a small native macOS app. A 32×32 pixel squid perches on the bottom edge of your main screen, bobbing and blinking. When a Claude Code or Codex task finishes, Jit plays a short chime, hops up, and shows which tool finished. He stays up until you click him, so you can't miss a finished task even if you were away.
+Jit is a small native macOS app. A 32×32 pixel squid hangs just below the bottom edge of your main screen, peeking over it with his tentacles gripping the edge and blinking now and then. When a Claude Code or Codex task finishes, Jit plays a short chime, jumps up, and floats above the edge with a mark showing which tool finished. He stays up until you click him, so you can't miss a finished task even if you were away.
 
 - One chime for both tools, generated in code, with its own volume slider.
 - A small mark per finished tool: an orange spark for Claude Code, a terminal prompt for Codex.
-- Click Jit to clear the marks. Double-click to tuck him away (only his tentacle tips show); double-click again to bring him back.
-- Tucks himself away while a fullscreen app is active. The chime still plays, and he hops up when you leave fullscreen.
+- Click Jit to clear the marks and send him back to peeking. Double-click to bring him up or send him back down, in any Space.
+- Keeps peeking while a fullscreen app is active. The chime still plays, and he jumps up when you leave fullscreen (or when you double-click him).
 - Pause from the menu bar: finished tasks still count and show up when you resume.
 - Clicks pass through everywhere except the squid, and Jit never takes focus.
 - Bring your own 32×32 sprite.
 
-| Finished tasks | Tucked | Menu bar |
+| Peeking | Finished tasks | Menu bar |
 | :---: | :---: | :---: |
-| <img src="docs/marks.png" alt="Jit with a Claude mark and a Codex mark above his head" width="190"> | <img src="docs/tucked.png" alt="Only Jit's four tentacle tips showing at the bottom edge" width="190"> | <img src="docs/menu.png" alt="Jit's menu: Pause, volume slider, Test Finish, Install Hooks, Remove Hooks, Start at Login, Quit Jit" width="190"> |
+| <img src="docs/peeking.png" alt="Jit's head and eyes peeking over the bottom edge, two tentacle tips gripping it" width="190"> | <img src="docs/marks.png" alt="Jit floating above the edge with a Claude mark and a Codex mark over his head" width="190"> | <img src="docs/menu.png" alt="Jit's menu: Pause, volume slider, Test Finish, Install Hooks, Remove Hooks, Start at Login, Quit Jit" width="190"> |
 
 ## Requirements
 
@@ -40,15 +40,15 @@ Jit is a small native macOS app. A 32×32 pixel squid perches on the bottom edge
 3. Allow any prompts macOS shows. You'll see a notification that Jit was added to your login items (Start at Login is on by default).
 4. Jit asks once whether to install its hooks. Click **Install Hooks**, or later use **Install Hooks…** in the squid menu in the menu bar. It adds a `Stop` hook to `~/.claude/settings.json` and `~/.codex/config.toml`, writing a timestamped backup of each file first.
 5. Codex only: Codex runs new hooks only after you trust them. Start `codex` in a terminal, type `/hooks`, and trust Jit's `Stop` hook.
-6. Click **Test Finish** in the menu. You should hear the chime, see Jit hop, and see both marks. Click Jit to clear them.
-7. Run a real task in Claude Code or Codex. When it finishes, Jit chimes and hops with that tool's mark. Claude Code loads hooks when a session starts, so use a new session.
+6. Click **Test Finish** in the menu. You should hear the chime, see Jit jump up, and see both marks. Click Jit to clear them.
+7. Run a real task in Claude Code or Codex. When it finishes, Jit chimes and jumps up with that tool's mark. Claude Code loads hooks when a session starts, so use a new session.
 
 ## Using your own sprite
 
 Jit takes any 32×32 PNG with a transparent background.
 
-- Put the feet (or tentacle tips) on the bottom row: that's where Jit grips the screen edge, and what shows when he's tucked.
-- Jit blinks by closing the brightest pixels, so give your sprite bright eyes.
+- Give it bright eyes: Jit finds the eyes as the brightest pixels, blinks by closing them, and peeks with everything down to just below them.
+- Put the feet (or tentacle tips) on the bottom rows: the paws that grip the screen edge take their colors from there.
 
 Keep the file outside Desktop, Documents and Downloads. macOS asks before an app reads those folders, and Jit waits on that prompt before it appears.
 
@@ -77,7 +77,7 @@ Claude Code / Codex finishes a turn
   → its Stop hook runs:  jit notify --tool claude|codex
   → the jit helper sends {"tool":"claude"} over a Unix socket
      (~/Library/Application Support/Jit/jit.sock)
-  → Jit plays the chime, hops, and shows the mark
+  → Jit plays the chime, jumps up, and shows the mark
 ```
 
 - **Install Hooks** copies the `jit` helper to `~/Library/Application Support/Jit/jit`, so the hooks keep working wherever Xcode builds the app.
@@ -94,8 +94,8 @@ Claude Code / Codex finishes a turn
 - **Jit isn't running.** Look for the squid icon in the menu bar. If it's missing, run Jit again from Xcode. While Jit is off, the hooks do nothing and cause no errors.
 - **No sound.** Check the volume slider in Jit's menu and your Mac's output volume. Pausing also silences the chime.
 - **Jit doesn't appear after you set a custom sprite.** macOS may be waiting for you to allow Jit to read the folder the sprite is in. Allow it, or move the sprite out of Desktop, Documents and Downloads.
-- **Jit is tucked and won't come up.** A fullscreen app is active, or you double-clicked him. Leave fullscreen or double-click his tentacle tips.
-- **Check the pipe by hand.** This should chime and hop:
+- **Jit keeps peeking after a task finishes.** A fullscreen app is active: he comes up when you leave fullscreen, or double-click him to bring him up now.
+- **Check the pipe by hand.** This should chime and bring him up:
 
   ```bash
   "$HOME/Library/Application Support/Jit/jit" notify --tool claude
