@@ -1,16 +1,16 @@
 import Foundation
 
 /// Listens on `~/Library/Application Support/Jit/jit.sock` for one-line JSON messages
-/// like `{"tool":"claude"}` from the `jit` helper.
+/// from the `jit` helper, like `{"tool":"claude","event":"finished","session":"…","pids":[…]}`.
 final class NotifyServer {
     static let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Jit")
 
-    private let onTool: (String) -> Void
+    private let onMessage: ([String: Any]) -> Void
     private var listener: DispatchSourceRead?
 
-    init(onTool: @escaping (String) -> Void) {
-        self.onTool = onTool
+    init(onMessage: @escaping ([String: Any]) -> Void) {
+        self.onMessage = onMessage
     }
 
     func start() {
@@ -64,9 +64,8 @@ final class NotifyServer {
 
     private func handle(_ data: Data) {
         for line in data.split(separator: UInt8(ascii: "\n")) {
-            guard let message = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                  let tool = message["tool"] as? String else { continue }
-            onTool(tool)
+            guard let message = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
+            onMessage(message)
         }
     }
 }

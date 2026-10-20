@@ -8,19 +8,20 @@ A tiny pixel squid that lives on the bottom edge of your Mac and chimes when Cla
 
 ## What it does
 
-Jit is a small native macOS app. A 32×32 pixel squid hangs just below the bottom edge of your main screen, peeking over it with his tentacles gripping the edge and blinking now and then. When a Claude Code or Codex task finishes, Jit plays a short chime, jumps up, and floats above the edge with a mark showing which tool finished. He stays up until you click him, so you can't miss a finished task even if you were away.
+Jit is a small native macOS app. A 32×32 pixel squid hangs just below the bottom edge of your main screen, peeking over it with his tentacles gripping the edge and blinking now and then. While Claude Code or Codex is working on your prompt, he rises a little and thinks, chin on a tentacle, with that tool's icon in a thought bubble. When the task finishes, Jit plays a short chime, jumps up, and floats above the edge with a mark showing which tool finished. He stays up until you click him, so you can't miss a finished task even if you were away.
 
 - One chime for both tools, generated in code, with its own volume slider.
 - A small mark per finished tool: an orange spark for Claude Code, a terminal prompt for Codex.
-- Click Jit to clear the marks and send him back to peeking. Double-click to bring him up or send him back down, in any Space.
+- Click Jit while he's idle and he thinks: a thought bubble offers Claude and Codex, and picking one takes you to the app it runs in (or opens it). Click him again to close the bubble.
+- Click Jit while he's up to clear the marks and send him back to peeking. Double-click to bring him up or send him back down, in any Space.
 - Ducks into his peek when you switch to a fullscreen app, and comes back up when you leave it. A task finishing still brings him up, even in fullscreen.
 - Pause from the menu bar: finished tasks still count and show up when you resume.
 - Clicks pass through everywhere except the squid, and Jit never takes focus.
 - Bring your own 32×32 sprite.
 
-| Peeking | Finished tasks | Menu bar |
-| :---: | :---: | :---: |
-| <img src="docs/peeking.png" alt="Jit's head and eyes peeking over the bottom edge, two tentacle tips gripping it" width="190"> | <img src="docs/marks.png" alt="Jit floating above the edge with a Claude mark and a Codex mark over his head" width="190"> | <img src="docs/menu.png" alt="Jit's menu: Pause, volume slider, Test Finish, Install Hooks, Remove Hooks, Start at Login, Quit Jit" width="190"> |
+| Peeking | Thinking | Finished tasks | Menu bar |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/peeking.png" alt="Jit's head and eyes peeking over the bottom edge, two tentacle tips gripping it" width="160"> | <img src="docs/thinking.png" alt="Jit risen a little with a tentacle on his chin and a thought bubble holding the Claude and Codex icons" width="160"> | <img src="docs/marks.png" alt="Jit floating above the edge with a Claude mark and a Codex mark over his head" width="160"> | <img src="docs/menu.png" alt="Jit's menu: Pause, volume slider, Test Finish, Install Hooks, Remove Hooks, Start at Login, Quit Jit" width="160"> |
 
 ## Requirements
 
@@ -38,10 +39,10 @@ Jit is a small native macOS app. A 32×32 pixel squid hangs just below the botto
 
 2. Open `Jit.xcodeproj` in Xcode, pick the **Jit** scheme and **My Mac**, then choose **Product > Run** (⌘R). The project signs to run locally, so no Apple developer team is needed.
 3. Allow any prompts macOS shows. You'll see a notification that Jit was added to your login items (Start at Login is on by default).
-4. Jit asks once whether to install its hooks. Click **Install Hooks**, or later use **Install Hooks…** in the squid menu in the menu bar. It adds a `Stop` hook to `~/.claude/settings.json` and `~/.codex/config.toml`, writing a timestamped backup of each file first.
-5. Codex only: Codex runs new hooks only after you trust them. Start `codex` in a terminal, type `/hooks`, and trust Jit's `Stop` hook.
+4. Jit asks once whether to install its hooks. Click **Install Hooks**, or later use **Install Hooks…** in the squid menu in the menu bar. It adds hooks to `~/.claude/settings.json` and `~/.codex/config.toml`, writing a timestamped backup of each file first. If you installed Jit's hooks with an earlier version, click **Install Hooks…** again to add the new ones.
+5. Codex only: Codex runs new hooks only after you trust them. Start `codex` in a terminal, type `/hooks`, and trust Jit's hooks.
 6. Click **Test Finish** in the menu. You should hear the chime, see Jit jump up, and see both marks. Click Jit to clear them.
-7. Run a real task in Claude Code or Codex. When it finishes, Jit chimes and jumps up with that tool's mark. Claude Code loads hooks when a session starts, so use a new session.
+7. Run a real task in Claude Code or Codex. While it works, Jit thinks with that tool's icon in his bubble; when it finishes, he chimes and jumps up with its mark. Claude Code loads hooks when a session starts, so use a new session.
 
 ## Using your own sprite
 
@@ -73,12 +74,20 @@ python3 tools/convert_sprite.py my-art.png my-sprite.png my-sprite-preview.png
 ## How it works
 
 ```
-Claude Code / Codex finishes a turn
-  → its Stop hook runs:  jit notify --tool claude|codex
-  → the jit helper sends {"tool":"claude"} over a Unix socket
+Claude Code / Codex starts or finishes a turn
+  → its hook runs:  jit notify --tool claude|codex [--event working|idle]
+  → the jit helper sends {"tool":…, "event":…, "session":…} over a Unix socket
      (~/Library/Application Support/Jit/jit.sock)
-  → Jit plays the chime, jumps up, and shows the mark
+  → Jit thinks while a session is working, and chimes and jumps up when it finishes
 ```
+
+| Event | Claude Code hook | Codex hook |
+| --- | --- | --- |
+| Finished (chime and jump) | `Stop` | `Stop` |
+| Working (thinking bubble) | `UserPromptSubmit` | `UserPromptSubmit` |
+| Stopped without finishing | `StopFailure`, `SessionEnd`, and the `idle_prompt` notification | `Interrupt`, `SessionEnd` |
+
+- The helper also passes along its parent processes, so Jit knows which app each tool runs in (Claude, the Codex app, a terminal…) and can take you there from the thought bubble. Before a tool has run, the bubble opens the Claude or Codex app.
 
 - **Install Hooks** copies the `jit` helper to `~/Library/Application Support/Jit/jit`, so the hooks keep working wherever Xcode builds the app.
 - If Jit isn't running, the helper exits silently with status 0, so it never breaks Claude Code or Codex.
@@ -89,11 +98,12 @@ Claude Code / Codex finishes a turn
 - **Nothing happens when a task finishes.** Click **Test Finish**. If that works, the hooks aren't running:
   - Click **Install Hooks…** again. It reports what it found.
   - Start a new Claude Code session (running sessions keep the hooks they started with).
-  - For Codex, trust the hook in `/hooks`.
+  - For Codex, trust the hooks in `/hooks`.
 - **Test Finish does nothing.** Jit may be paused: if the menu says **Resume**, click it.
 - **Jit isn't running.** Look for the squid icon in the menu bar. If it's missing, run Jit again from Xcode. While Jit is off, the hooks do nothing and cause no errors.
 - **No sound.** Check the volume slider in Jit's menu and your Mac's output volume. Pausing also silences the chime.
 - **Jit doesn't appear after you set a custom sprite.** macOS may be waiting for you to allow Jit to read the folder the sprite is in. Allow it, or move the sprite out of Desktop, Documents and Downloads.
+- **The bubble still shows Claude working after you stopped it with Esc.** Claude Code has no hook for an interrupt. Jit clears it when Claude reports it's waiting for input, about a minute later, or when you send the next prompt and it finishes.
 - **Check the pipe by hand.** This should chime and bring him up:
 
   ```bash

@@ -1,13 +1,15 @@
 import AppKit
 
-enum Tool: String {
+enum Tool: String, CaseIterable {
     case claude, codex
     var displayName: String { self == .claude ? "Claude Code" : "Codex" }
 }
 
-/// Jit's behaviour: where he sits, when he peeks or comes up, the marks, and pause.
+/// Jit's behaviour: where he sits, when he peeks, thinks or comes up, the marks, and pause.
 final class Pet {
     var onChime: () -> Void = {}
+    /// Called with the tool picked in the thought bubble.
+    var onPick: (Tool) -> Void = { _ in }
 
     private(set) var paused = false
     private let window: NSPanel
@@ -21,9 +23,14 @@ final class Pet {
     private var raisedInFullscreen = false
     private var marks: [Tool] = []
     private var finishedWhilePaused: [Tool] = []
+    /// Sessions that are working on a prompt right now, per tool.
+    private var working: [Tool: Set<String>] = [:]
+    /// The thought bubble you opened by clicking him while he was idle.
+    private var choosing = false
     private var timers: [Timer] = []
 
     private var shouldBeUp: Bool { wantsUp && (!fullscreen || raisedInFullscreen) }
+    private var busyTools: [Tool] { Tool.allCases.filter { !(working[$0]?.isEmpty ?? true) } }
 
     init(sprite: Sprite) {
         view = PetView(sprite: sprite)
@@ -37,8 +44,9 @@ final class Pet {
         window.ignoresMouseEvents = true
         window.contentView = view
 
-        view.onClick = { [weak self] in self?.dismiss() }
+        view.onClick = { [weak self] in self?.click() }
         view.onDoubleClick = { [weak self] in self?.toggleUp() }
+        view.onPick = { [weak self] tool in self?.pick(tool) }
 
         fullscreen = Self.fullscreenAppIsActive()
         place()
@@ -65,6 +73,18 @@ final class Pet {
 
     // MARK: Events
 
+    /// A session started (or stopped) working on a prompt.
+    func setWorking(_ tool: Tool, session: String, _ isWorking: Bool) {
+        if isWorking { working[tool, default: []].insert(session) } else { working[tool]?.remove(session) }
+        update()
+    }
+
+    /// A tool finished a turn: that session is no longer working.
+    func finished(_ tool: Tool, session: String) {
+        working[tool]?.remove(session)
+        finish([tool])
+    }
+
     /// A tool finished (or Test finish). Plays one chime for the whole batch.
     func finish(_ tools: [Tool]) {
         if paused {
@@ -80,6 +100,8 @@ final class Pet {
         if !paused && !finishedWhilePaused.isEmpty {
             reveal(finishedWhilePaused)  // marks appear on resume, without a chime
             finishedWhilePaused = []
+        } else {
+            update()
         }
     }
 
@@ -88,16 +110,26 @@ final class Pet {
         add(tools, to: &marks)
         wantsUp = true
         raisedInFullscreen = fullscreen
+        choosing = false
         update(jumpAgain: true)
     }
 
-    /// Click: clear the marks and drop back into the peek.
-    private func dismiss() {
-        guard view.isUp else { return }
-        marks = []
-        wantsUp = false
-        raisedInFullscreen = false
+    /// Click: when up, clear the marks and drop back down; when idle, open or close the bubble.
+    private func click() {
+        if view.isUp {
+            marks = []
+            wantsUp = false
+            raisedInFullscreen = false
+        } else {
+            choosing.toggle()
+        }
         update()
+    }
+
+    private func pick(_ tool: Tool) {
+        choosing = false
+        update()
+        onPick(tool)
     }
 
     /// Double-click: toggle peeking and up, in any Space, fullscreen ones included.
@@ -110,6 +142,7 @@ final class Pet {
             wantsUp = true
             raisedInFullscreen = fullscreen
         }
+        choosing = false
         update()
     }
 
@@ -124,6 +157,9 @@ final class Pet {
     /// Moves him into the pose the state calls for. `jumpAgain` makes him jump even when
     /// he's already up, for a new finish.
     private func update(jumpAgain: Bool = false) {
+        // Thinking: the bubble you opened offers both tools; otherwise it shows what's working.
+        let busy = paused ? [] : busyTools
+        view.setThinking(choosing ? Tool.allCases : (busy.isEmpty ? nil : busy), busy: !busy.isEmpty)
         if shouldBeUp && (!view.isUp || jumpAgain) {
             view.jumpUp()
             view.setMarks(marks, delay: PetView.jumpDuration)

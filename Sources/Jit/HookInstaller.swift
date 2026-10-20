@@ -1,7 +1,8 @@
 import Foundation
 
-/// Adds and removes the `Stop` hooks that run `jit notify` in Claude Code
-/// (`~/.claude/settings.json`) and Codex (`~/.codex/config.toml`).
+/// Adds and removes the hooks that run `jit notify` in Claude Code (`~/.claude/settings.json`)
+/// and Codex (`~/.codex/config.toml`): `Stop` for a finished turn, plus the events that tell
+/// Jit a tool started working on a prompt or stopped without finishing.
 ///
 /// Before changing a file it writes a timestamped backup next to it. Only Jit's own
 /// entries are added or removed; everything else in the file is kept.
@@ -15,7 +16,25 @@ enum HookInstaller {
     private static let tomlBegin = "# >>> Jit hook (added by Jit; remove it with \"Remove hooks\" in the Jit menu)"
     private static let tomlEnd = "# <<< Jit hook"
 
-    static func command(_ tool: Tool) -> String { "\"\(helper.path)\" notify --tool \(tool.rawValue)" }
+    /// (hook event, matcher, `--event` for jit notify). nil `--event` means a finished turn.
+    private static let claudeHooks: [(event: String, matcher: String?, jitEvent: String?)] = [
+        ("Stop", nil, nil),
+        ("UserPromptSubmit", nil, "working"),
+        ("StopFailure", nil, "idle"),   // the turn ended on an API error
+        ("SessionEnd", nil, "idle"),
+        // Claude Code has no hook for an interrupt; this fires after a minute of waiting for input.
+        ("Notification", "idle_prompt", "idle"),
+    ]
+    private static let codexHooks: [(event: String, jitEvent: String?)] = [
+        ("Stop", nil),
+        ("UserPromptSubmit", "working"),
+        ("Interrupt", "idle"),
+        ("SessionEnd", "idle"),
+    ]
+
+    static func command(_ tool: Tool, event: String? = nil) -> String {
+        "\"\(helper.path)\" notify --tool \(tool.rawValue)" + (event.map { " --event \($0)" } ?? "")
+    }
 
     /// Returns one line per tool describing what happened.
     static func install() -> [String] {
@@ -38,7 +57,7 @@ enum HookInstaller {
         do { return "\(name): \(try action())" } catch { return "\(name): failed, \(error.localizedDescription)" }
     }
 
-    // MARK: Claude Code: hooks.Stop[] in settings.json
+    // MARK: Claude Code: hooks.<Event>[] in settings.json
 
     private static func installClaude() throws -> String {
         guard FileManager.default.fileExists(atPath: claudeSettings.deletingLastPathComponent().path) else {
@@ -46,34 +65,44 @@ enum HookInstaller {
         }
         var settings = try readClaudeSettings()
         var hooks = try dictionary(settings["hooks"], "hooks")
-        var stop = hooks["Stop"] as? [[String: Any]] ?? []
-        if stop.contains(where: isJitGroup) { return "hook already installed." }
-        stop.append(["hooks": [["type": "command", "command": command(.claude)]]])
-        hooks["Stop"] = stop
+        var added = 0
+        for hook in claudeHooks {
+            var groups = hooks[hook.event] as? [[String: Any]] ?? []
+            guard !groups.contains(where: isJitGroup) else { continue }
+            var group: [String: Any] = ["hooks": [["type": "command", "command": command(.claude, event: hook.jitEvent)]]]
+            if let matcher = hook.matcher { group["matcher"] = matcher }
+            groups.append(group)
+            hooks[hook.event] = groups
+            added += 1
+        }
+        if added == 0 { return "hooks already installed." }
         settings["hooks"] = hooks
         let backup = try write(json: settings, to: claudeSettings)
-        return "hook installed" + (backup.map { ", backup at \($0)" } ?? "") + "."
+        return "hooks installed" + (backup.map { ", backup at \($0)" } ?? "") + "."
     }
 
     private static func removeClaude() throws -> String {
         guard FileManager.default.fileExists(atPath: claudeSettings.path) else { return "nothing to remove." }
         var settings = try readClaudeSettings()
         var hooks = try dictionary(settings["hooks"], "hooks")
-        guard let stop = hooks["Stop"] as? [[String: Any]], stop.contains(where: isJitGroup) else {
-            return "nothing to remove."
+        var removed = false
+        for (event, value) in hooks {
+            guard let groups = value as? [[String: Any]], groups.contains(where: isJitGroup) else { continue }
+            let kept: [[String: Any]] = groups.compactMap { group in
+                guard var handlers = group["hooks"] as? [[String: Any]] else { return group }
+                handlers.removeAll(where: isJitHandler)
+                if handlers.isEmpty { return nil }
+                var group = group
+                group["hooks"] = handlers
+                return group
+            }
+            hooks[event] = kept.isEmpty ? nil : kept
+            removed = true
         }
-        let kept: [[String: Any]] = stop.compactMap { group in
-            guard var handlers = group["hooks"] as? [[String: Any]] else { return group }
-            handlers.removeAll(where: isJitHandler)
-            if handlers.isEmpty { return nil }
-            var group = group
-            group["hooks"] = handlers
-            return group
-        }
-        hooks["Stop"] = kept.isEmpty ? nil : kept
+        guard removed else { return "nothing to remove." }
         settings["hooks"] = hooks.isEmpty ? nil : hooks
         let backup = try write(json: settings, to: claudeSettings)
-        return "hook removed" + (backup.map { ", backup at \($0)" } ?? "") + "."
+        return "hooks removed" + (backup.map { ", backup at \($0)" } ?? "") + "."
     }
 
     private static func readClaudeSettings() throws -> [String: Any] {
@@ -98,41 +127,50 @@ enum HookInstaller {
         (group["hooks"] as? [[String: Any]])?.contains(where: isJitHandler) == true
     }
 
-    // MARK: Codex: a [[hooks.Stop]] block in config.toml, between marker comments
+    // MARK: Codex: [[hooks.<Event>]] blocks in config.toml, between marker comments
+
+    private static var codexBlock: String {
+        let tables = codexHooks.map { hook in
+            """
+            [[hooks.\(hook.event)]]
+
+            [[hooks.\(hook.event).hooks]]
+            type = "command"
+            command = '\(command(.codex, event: hook.jitEvent))'
+            """
+        }
+        return "\n" + ([tomlBegin] + tables + [tomlEnd]).joined(separator: "\n") + "\n"
+    }
 
     private static func installCodex() throws -> String {
         guard FileManager.default.fileExists(atPath: codexConfig.deletingLastPathComponent().path) else {
             return "not installed (no ~/.codex folder), skipped."
         }
         var text = (try? String(contentsOf: codexConfig, encoding: .utf8)) ?? ""
-        if text.contains(tomlBegin) { return "hook already installed." }
+        if text.contains(codexBlock) { return "hooks already installed." }
+        text = withoutCodexBlock(text) ?? text  // an older Jit block is replaced
         if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
-        text += """
-
-            \(tomlBegin)
-            [[hooks.Stop]]
-
-            [[hooks.Stop.hooks]]
-            type = "command"
-            command = '\(command(.codex))'
-            \(tomlEnd)
-
-            """
+        text += codexBlock
         let backup = try write(text: text, to: codexConfig)
-        return "hook installed" + (backup.map { ", backup at \($0)" } ?? "") + "."
+        return "hooks installed" + (backup.map { ", backup at \($0)" } ?? "")
+            + ". Trust them in Codex: run codex and type /hooks."
     }
 
     private static func removeCodex() throws -> String {
         guard let text = try? String(contentsOf: codexConfig, encoding: .utf8),
-              let begin = text.range(of: "\n" + tomlBegin) ?? text.range(of: tomlBegin),
+              let trimmed = withoutCodexBlock(text) else { return "nothing to remove." }
+        let backup = try write(text: trimmed, to: codexConfig)
+        return "hooks removed" + (backup.map { ", backup at \($0)" } ?? "") + "."
+    }
+
+    /// `text` with Jit's block (and the blank line before it) taken out, or nil if there is none.
+    private static func withoutCodexBlock(_ text: String) -> String? {
+        guard let begin = text.range(of: "\n" + tomlBegin) ?? text.range(of: tomlBegin),
               let end = text.range(of: tomlEnd + "\n", range: begin.upperBound..<text.endIndex)
-                ?? text.range(of: tomlEnd, range: begin.upperBound..<text.endIndex) else {
-            return "nothing to remove."
-        }
+                ?? text.range(of: tomlEnd, range: begin.upperBound..<text.endIndex) else { return nil }
         var trimmed = text
         trimmed.removeSubrange(begin.lowerBound..<end.upperBound)
-        let backup = try write(text: trimmed, to: codexConfig)
-        return "hook removed" + (backup.map { ", backup at \($0)" } ?? "") + "."
+        return trimmed
     }
 
     // MARK: Writing with a backup

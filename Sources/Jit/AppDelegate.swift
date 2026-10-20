@@ -7,6 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pet: Pet!
     private var server: NotifyServer!
     private var statusItem: NSStatusItem!
+    /// The app each tool last ran in (Claude.app, the Codex app, a terminal…), to open from the bubble.
+    private var hostApps: [Tool: URL] = [:]
+    private static let defaultApps: [Tool: String] = [.claude: "com.anthropic.claudefordesktop", .codex: "com.openai.codex"]
     private let pauseItem = NSMenuItem(title: "Pause", action: #selector(togglePause), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Start at Login", action: #selector(toggleLogin), keyEquivalent: "")
 
@@ -16,12 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         pet = Pet(sprite: Sprite.load())
         pet.onChime = { [chime] in chime.play() }
+        pet.onPick = { [weak self] tool in self?.open(tool) }
 
-        server = NotifyServer { [weak self] name in
-            guard let tool = Tool(rawValue: name) else { return }
-            NSLog("Jit: %@ finished", tool.displayName)
-            self?.pet.finish([tool])
-        }
+        server = NotifyServer { [weak self] message in self?.handle(message) }
         server.start()
 
         buildMenu()
@@ -36,6 +36,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defaults.set(true, forKey: "askedToInstallHooks")
             askToInstallHooks()
         }
+    }
+
+    // MARK: Messages from the jit helper
+
+    private func handle(_ message: [String: Any]) {
+        guard let name = message["tool"] as? String, let tool = Tool(rawValue: name) else { return }
+        let event = message["event"] as? String ?? "finished"
+        let session = message["session"] as? String ?? "manual"
+        NSLog("Jit: %@ %@", tool.displayName, event)
+        // The first regular app among the hook's parent processes is where the tool runs.
+        if let pids = message["pids"] as? [Int],
+           let app = pids.lazy.compactMap({ NSRunningApplication(processIdentifier: pid_t($0)) })
+               .first(where: { $0.activationPolicy == .regular && $0 != NSRunningApplication.current }),
+           let url = app.bundleURL {
+            hostApps[tool] = url
+        }
+        switch event {
+        case "working": pet.setWorking(tool, session: session, true)
+        case "idle": pet.setWorking(tool, session: session, false)
+        default: pet.finished(tool, session: session)
+        }
+    }
+
+    /// Brings up the app the tool last ran in, or opens its default app.
+    private func open(_ tool: Tool) {
+        let url = hostApps[tool] ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.defaultApps[tool]!)
+        guard let url else {
+            alert("Couldn't find \(tool.displayName)", "Jit didn't find an app for \(tool.displayName). Run a task in it once and Jit will remember where it runs.")
+            return
+        }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     // MARK: Menu bar
