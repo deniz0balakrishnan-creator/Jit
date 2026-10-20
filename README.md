@@ -50,6 +50,8 @@ Jit takes any 32×32 PNG with a transparent background.
 - Put the feet (or tentacle tips) on the bottom row: that's where Jit grips the screen edge, and what shows when he's tucked.
 - Jit blinks by closing the brightest pixels, so give your sprite bright eyes.
 
+Keep the file outside Desktop, Documents and Downloads. macOS asks before an app reads those folders, and Jit waits on that prompt before it appears.
+
 Point Jit at it, then quit Jit from its menu and run it again:
 
 ```bash
@@ -91,6 +93,7 @@ Claude Code / Codex finishes a turn
 - **Test Finish does nothing.** Jit may be paused: if the menu says **Resume**, click it.
 - **Jit isn't running.** Look for the squid icon in the menu bar. If it's missing, run Jit again from Xcode. While Jit is off, the hooks do nothing and cause no errors.
 - **No sound.** Check the volume slider in Jit's menu and your Mac's output volume. Pausing also silences the chime.
+- **Jit doesn't appear after you set a custom sprite.** macOS may be waiting for you to allow Jit to read the folder the sprite is in. Allow it, or move the sprite out of Desktop, Documents and Downloads.
 - **Jit is tucked and won't come up.** A fullscreen app is active, or you double-clicked him. Leave fullscreen or double-click his tentacle tips.
 - **Check the pipe by hand.** This should chime and hop:
 
